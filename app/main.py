@@ -3,17 +3,23 @@ from sqlalchemy.orm import Session
 
 from app.database import Base, engine, SessionLocal
 from app import models
-from app.schemas import RegisterRequest
-from app.auth import hash_password
+from app.schemas import RegisterRequest, LoginRequest
+from app.auth import hash_password, verify_password
 
 
-# Create database tables
+# ============================================================
+# CREATE DATABASE TABLES
+# ============================================================
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
 
-# Database session
+# ============================================================
+# DATABASE SESSION
+# ============================================================
+
 def get_db():
     db = SessionLocal()
 
@@ -23,21 +29,37 @@ def get_db():
         db.close()
 
 
-# Root endpoint
+# ============================================================
+# ROOT ENDPOINT
+# ============================================================
+
 @app.get("/")
 def root():
-    return {"message": "ASHWA Backend is running!"}
+    return {
+        "message": "ASHWA Backend is running!"
+    }
 
 
-# Test endpoint
+# ============================================================
+# TEST ENDPOINT
+# ============================================================
+
 @app.get("/hello")
 def hello():
-    return {"message": "Hello from ASHWA"}
+    return {
+        "message": "Hello from ASHWA"
+    }
 
 
-# Register endpoint
+# ============================================================
+# REGISTER ENDPOINT
+# ============================================================
+
 @app.post("/register")
-def register(user: RegisterRequest, db: Session = Depends(get_db)):
+def register(
+    user: RegisterRequest,
+    db: Session = Depends(get_db)
+):
 
     # Check whether email already exists
     existing_user = (
@@ -73,4 +95,49 @@ def register(user: RegisterRequest, db: Session = Depends(get_db)):
         "message": "User registered successfully",
         "user_id": new_user.id,
         "email": new_user.email,
+    }
+
+
+# ============================================================
+# LOGIN ENDPOINT
+# ============================================================
+
+@app.post("/login")
+def login(
+    user: LoginRequest,
+    db: Session = Depends(get_db)
+):
+
+    # Find user by email
+    existing_user = (
+        db.query(models.User)
+        .filter(models.User.email == user.email)
+        .first()
+    )
+
+    # User not found
+    if not existing_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
+    # Verify password
+    password_correct = verify_password(
+        user.password,
+        existing_user.password_hash
+    )
+
+    # Wrong password
+    if not password_correct:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
+    # Login successful
+    return {
+        "message": "Login successful",
+        "user_id": existing_user.id,
+        "email": existing_user.email,
     }

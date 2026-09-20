@@ -10,3 +10,8 @@ class RegisterRequest(BaseModel):
     riding_level: str
     discipline: str
     primary_goal: str
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str

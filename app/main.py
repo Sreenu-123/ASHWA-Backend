@@ -79,7 +79,10 @@ def register(
             detail="Email already registered"
         )
 
-    # Create new user
+    # ========================================================
+    # CREATE NEW USER
+    # ========================================================
+
     new_user = models.User(
         full_name=user.full_name,
         email=user.email,
@@ -89,17 +92,26 @@ def register(
         riding_level=user.riding_level,
         discipline=user.discipline,
         primary_goal=user.primary_goal,
+        horse_name=user.horse_name,
     )
 
-    # Save user to database
+    # ========================================================
+    # SAVE USER TO DATABASE
+    # ========================================================
+
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    # ========================================================
+    # REGISTER SUCCESS RESPONSE
+    # ========================================================
 
     return {
         "message": "User registered successfully",
         "user_id": new_user.id,
         "email": new_user.email,
+        "horse_name": new_user.horse_name,
     }
 
 
@@ -127,7 +139,10 @@ def login(
             detail="Invalid email or password"
         )
 
-    # Verify password
+    # ========================================================
+    # VERIFY PASSWORD
+    # ========================================================
+
     password_correct = verify_password(
         user.password,
         existing_user.password_hash
@@ -250,4 +265,5 @@ def get_current_user(
         "riding_level": user.riding_level,
         "discipline": user.discipline,
         "primary_goal": user.primary_goal,
+        "horse_name": user.horse_name,
     }

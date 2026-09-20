@@ -10,6 +10,7 @@ class RegisterRequest(BaseModel):
     riding_level: str
     discipline: str
     primary_goal: str
+    horse_name: str
 
 
 class LoginRequest(BaseModel):

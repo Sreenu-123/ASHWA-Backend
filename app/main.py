@@ -4,7 +4,11 @@ from sqlalchemy.orm import Session
 from app.database import Base, engine, SessionLocal
 from app import models
 from app.schemas import RegisterRequest, LoginRequest
-from app.auth import hash_password, verify_password
+from app.auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+)
 
 
 # ============================================================
@@ -135,9 +139,25 @@ def login(
             detail="Invalid email or password"
         )
 
-    # Login successful
+    # ========================================================
+    # CREATE JWT ACCESS TOKEN
+    # ========================================================
+
+    access_token = create_access_token(
+        data={
+            "sub": str(existing_user.id),
+            "email": existing_user.email,
+        }
+    )
+
+    # ========================================================
+    # LOGIN SUCCESS RESPONSE
+    # ========================================================
+
     return {
         "message": "Login successful",
+        "access_token": access_token,
+        "token_type": "bearer",
         "user_id": existing_user.id,
         "email": existing_user.email,
     }

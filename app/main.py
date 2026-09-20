@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 
 from app.database import Base, engine, SessionLocal
@@ -8,6 +8,7 @@ from app.auth import (
     hash_password,
     verify_password,
     create_access_token,
+    verify_access_token,
 )
 
 
@@ -160,4 +161,93 @@ def login(
         "token_type": "bearer",
         "user_id": existing_user.id,
         "email": existing_user.email,
+    }
+
+
+# ============================================================
+# GET CURRENT USER
+# ============================================================
+
+@app.get("/me")
+def get_current_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db)
+):
+
+    # ========================================================
+    # CHECK AUTHORIZATION HEADER
+    # ========================================================
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header missing"
+        )
+
+    # ========================================================
+    # CHECK BEARER FORMAT
+    # ========================================================
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization format"
+        )
+
+    # Extract token
+    token = authorization.split(" ")[1]
+
+    # ========================================================
+    # VERIFY JWT TOKEN
+    # ========================================================
+
+    payload = verify_access_token(token)
+
+    if not payload:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
+    # ========================================================
+    # GET USER ID FROM TOKEN
+    # ========================================================
+
+    user_id = payload.get("sub")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token payload"
+        )
+
+    # ========================================================
+    # FIND USER IN DATABASE
+    # ========================================================
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.id == int(user_id))
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    # ========================================================
+    # RETURN CURRENT USER
+    # ========================================================
+
+    return {
+        "id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "age": user.age,
+        "riding_experience": user.riding_experience,
+        "riding_level": user.riding_level,
+        "discipline": user.discipline,
+        "primary_goal": user.primary_goal,
     }

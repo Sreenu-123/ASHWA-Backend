@@ -1,11 +1,22 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi import (
+    FastAPI,
+    Depends,
+    HTTPException,
+    Header,
+    UploadFile,
+    File,
+)
+from fastapi.staticfiles import StaticFiles
+
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.database import Base, engine, SessionLocal
 from app import models
+
 from app.schemas import (
     RegisterRequest,
     LoginRequest,
@@ -13,6 +24,7 @@ from app.schemas import (
     RideSessionCreate,
     RideSessionResponse,
 )
+
 from app.auth import (
     hash_password,
     verify_password,
@@ -36,9 +48,34 @@ app = FastAPI()
 
 
 # ============================================================
-# DATABASE SESSION
+# PROFILE IMAGE STORAGE
 # ============================================================
 
+BASE_DIR = Path(__file__).resolve().parent
+
+UPLOADS_DIR = BASE_DIR / "uploads"
+PROFILE_IMAGES_DIR = UPLOADS_DIR / "profile_images"
+
+PROFILE_IMAGES_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+
+# ============================================================
+# SERVE UPLOADED FILES
+# ============================================================
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory=str(UPLOADS_DIR)),
+    name="uploads"
+)
+
+
+# ============================================================
+# DATABASE SESSION
+# ============================================================
 
 def get_db():
     db = SessionLocal()
@@ -53,7 +90,6 @@ def get_db():
 # ROOT ENDPOINT
 # ============================================================
 
-
 @app.get("/")
 def root():
     return {
@@ -65,7 +101,6 @@ def root():
 # TEST ENDPOINT
 # ============================================================
 
-
 @app.get("/hello")
 def hello():
     return {
@@ -76,7 +111,6 @@ def hello():
 # ============================================================
 # REGISTER ENDPOINT
 # ============================================================
-
 
 @app.post("/register")
 def register(
@@ -139,7 +173,6 @@ def register(
 # ============================================================
 # LOGIN ENDPOINT
 # ============================================================
-
 
 @app.post("/login")
 def login(
@@ -209,7 +242,6 @@ def login(
 # ============================================================
 # GET CURRENT USER
 # ============================================================
-
 
 @app.get("/me")
 def get_current_user(
@@ -297,13 +329,13 @@ def get_current_user(
         "discipline": user.discipline,
         "primary_goal": user.primary_goal,
         "horse_name": user.horse_name,
+        "profile_image": user.profile_image,
     }
 
 
 # ============================================================
 # UPDATE CURRENT USER PROFILE
 # ============================================================
-
 
 @app.put("/me")
 def update_current_user(
@@ -442,14 +474,195 @@ def update_current_user(
             "discipline": user.discipline,
             "primary_goal": user.primary_goal,
             "horse_name": user.horse_name,
+            "profile_image": user.profile_image,
         },
+    }
+
+
+# ============================================================
+# UPLOAD PROFILE IMAGE
+# ============================================================
+
+@app.post("/me/profile-image")
+async def upload_profile_image(
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db)
+):
+
+    # --------------------------------------------------------
+    # CHECK AUTHORIZATION HEADER
+    # --------------------------------------------------------
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header missing"
+        )
+
+    # --------------------------------------------------------
+    # CHECK BEARER FORMAT
+    # --------------------------------------------------------
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization format"
+        )
+
+    # --------------------------------------------------------
+    # EXTRACT TOKEN
+    # --------------------------------------------------------
+
+    token = authorization.split(" ")[1]
+
+    # --------------------------------------------------------
+    # VERIFY JWT TOKEN
+    # --------------------------------------------------------
+
+    payload = verify_access_token(token)
+
+    if not payload:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
+    # --------------------------------------------------------
+    # GET USER ID FROM TOKEN
+    # --------------------------------------------------------
+
+    user_id = payload.get("sub")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token payload"
+        )
+
+    user_id = int(user_id)
+
+    # --------------------------------------------------------
+    # FIND CURRENT USER
+    # --------------------------------------------------------
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.id == user_id)
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    # --------------------------------------------------------
+    # CHECK FILE TYPE
+    # --------------------------------------------------------
+
+    allowed_types = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+    }
+
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Only JPG, PNG and WEBP images are allowed"
+        )
+
+    # --------------------------------------------------------
+    # READ FILE
+    # --------------------------------------------------------
+
+    file_data = await file.read()
+
+    # --------------------------------------------------------
+    # CHECK FILE SIZE
+    # Maximum: 5 MB
+    # --------------------------------------------------------
+
+    max_file_size = 5 * 1024 * 1024
+
+    if len(file_data) > max_file_size:
+        raise HTTPException(
+            status_code=400,
+            detail="Profile image must be smaller than 5 MB"
+        )
+
+    # --------------------------------------------------------
+    # CREATE USER-SPECIFIC FILE NAME
+    # --------------------------------------------------------
+
+    extension = allowed_types[file.content_type]
+
+    file_name = f"user_{user_id}{extension}"
+
+    file_path = PROFILE_IMAGES_DIR / file_name
+
+    # --------------------------------------------------------
+    # DELETE OLD PROFILE IMAGE
+    # --------------------------------------------------------
+
+    for old_extension in [".jpg", ".png", ".webp"]:
+
+        old_file = (
+            PROFILE_IMAGES_DIR
+            / f"user_{user_id}{old_extension}"
+        )
+
+        if old_file.exists() and old_file != file_path:
+            old_file.unlink()
+
+    # --------------------------------------------------------
+    # SAVE IMAGE TO SERVER
+    # --------------------------------------------------------
+
+    with open(file_path, "wb") as image_file:
+        image_file.write(file_data)
+
+    # --------------------------------------------------------
+    # SAVE IMAGE PATH TO DATABASE
+    # --------------------------------------------------------
+
+    image_url = (
+        f"/uploads/profile_images/{file_name}"
+    )
+
+    user.profile_image = image_url
+
+    try:
+        db.commit()
+        db.refresh(user)
+
+    except IntegrityError:
+        db.rollback()
+
+        # Remove uploaded file if DB update fails
+        if file_path.exists():
+            file_path.unlink()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to save profile image"
+        )
+
+    # --------------------------------------------------------
+    # SUCCESS RESPONSE
+    # --------------------------------------------------------
+
+    return {
+        "message": "Profile image uploaded successfully",
+        "profile_image": user.profile_image,
     }
 
 
 # ============================================================
 # CREATE RIDE SESSION
 # ============================================================
-
 
 @app.post(
     "/rides",
@@ -602,7 +815,6 @@ def create_ride_session(
 # ============================================================
 # GET MY RIDE HISTORY
 # ============================================================
-
 
 @app.get(
     "/rides",

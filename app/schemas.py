@@ -58,3 +58,37 @@ class UpdateProfileRequest(BaseModel):
     primary_goal: str
 
     horse_name: str
+
+
+# ============================================================
+# CREATE RIDE SESSION REQUEST
+# ============================================================
+
+class RideSessionCreate(BaseModel):
+
+    horse_name: str
+
+    discipline: str
+
+    duration_seconds: int
+
+
+# ============================================================
+# RIDE SESSION RESPONSE
+# ============================================================
+
+class RideSessionResponse(BaseModel):
+
+    id: int
+
+    user_id: int
+
+    horse_name: str
+
+    discipline: str
+
+    duration_seconds: int
+
+    started_at: str
+
+    ended_at: str | None

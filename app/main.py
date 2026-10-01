@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import FastAPI, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -8,6 +10,8 @@ from app.schemas import (
     RegisterRequest,
     LoginRequest,
     UpdateProfileRequest,
+    RideSessionCreate,
+    RideSessionResponse,
 )
 from app.auth import (
     hash_password,
@@ -22,6 +26,7 @@ from app.auth import (
 # ============================================================
 
 Base.metadata.create_all(bind=engine)
+
 
 app = FastAPI()
 
@@ -449,4 +454,156 @@ def update_current_user(
             "horse_name":
                 user.horse_name,
         },
+    }
+
+
+# ============================================================
+# CREATE RIDE SESSION
+# ============================================================
+
+@app.post(
+    "/rides",
+    response_model=RideSessionResponse
+)
+def create_ride_session(
+    ride_data: RideSessionCreate,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db)
+):
+
+    # --------------------------------------------------------
+    # CHECK AUTHORIZATION HEADER
+    # --------------------------------------------------------
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header missing"
+        )
+
+    # --------------------------------------------------------
+    # CHECK BEARER FORMAT
+    # --------------------------------------------------------
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization format"
+        )
+
+    # --------------------------------------------------------
+    # EXTRACT TOKEN
+    # --------------------------------------------------------
+
+    token = authorization.split(" ")[1]
+
+    # --------------------------------------------------------
+    # VERIFY JWT TOKEN
+    # --------------------------------------------------------
+
+    payload = verify_access_token(token)
+
+    if not payload:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
+    # --------------------------------------------------------
+    # GET USER ID FROM TOKEN
+    # --------------------------------------------------------
+
+    user_id = payload.get("sub")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token payload"
+        )
+
+    # --------------------------------------------------------
+    # FIND CURRENT USER
+    # --------------------------------------------------------
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.id == int(user_id))
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    # --------------------------------------------------------
+    # VALIDATE DURATION
+    # --------------------------------------------------------
+
+    if ride_data.duration_seconds < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Duration cannot be negative"
+        )
+
+    # --------------------------------------------------------
+    # CREATE RIDE TIME
+    # --------------------------------------------------------
+
+    ended_at = datetime.now(timezone.utc)
+
+    started_at = (
+        ended_at
+        - timedelta(
+            seconds=ride_data.duration_seconds
+        )
+    )
+
+    # --------------------------------------------------------
+    # CREATE RIDE SESSION
+    # --------------------------------------------------------
+
+    new_ride = models.RideSession(
+        user_id=user.id,
+        horse_name=ride_data.horse_name,
+        discipline=ride_data.discipline,
+        duration_seconds=ride_data.duration_seconds,
+        started_at=started_at,
+        ended_at=ended_at,
+    )
+
+    # --------------------------------------------------------
+    # SAVE RIDE TO DATABASE
+    # --------------------------------------------------------
+
+    try:
+        db.add(new_ride)
+        db.commit()
+        db.refresh(new_ride)
+
+    except IntegrityError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to save ride session"
+        )
+
+    # --------------------------------------------------------
+    # RIDE SUCCESS RESPONSE
+    # --------------------------------------------------------
+
+    return {
+        "id": new_ride.id,
+        "user_id": new_ride.user_id,
+        "horse_name": new_ride.horse_name,
+        "discipline": new_ride.discipline,
+        "duration_seconds": new_ride.duration_seconds,
+        "started_at": new_ride.started_at.isoformat(),
+        "ended_at": (
+            new_ride.ended_at.isoformat()
+            if new_ride.ended_at
+            else None
+        ),
     }

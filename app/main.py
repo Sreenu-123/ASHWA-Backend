@@ -28,12 +28,17 @@ from app.auth import (
 Base.metadata.create_all(bind=engine)
 
 
+# ============================================================
+# FASTAPI APP
+# ============================================================
+
 app = FastAPI()
 
 
 # ============================================================
 # DATABASE SESSION
 # ============================================================
+
 
 def get_db():
     db = SessionLocal()
@@ -48,6 +53,7 @@ def get_db():
 # ROOT ENDPOINT
 # ============================================================
 
+
 @app.get("/")
 def root():
     return {
@@ -59,6 +65,7 @@ def root():
 # TEST ENDPOINT
 # ============================================================
 
+
 @app.get("/hello")
 def hello():
     return {
@@ -69,6 +76,7 @@ def hello():
 # ============================================================
 # REGISTER ENDPOINT
 # ============================================================
+
 
 @app.post("/register")
 def register(
@@ -131,6 +139,7 @@ def register(
 # ============================================================
 # LOGIN ENDPOINT
 # ============================================================
+
 
 @app.post("/login")
 def login(
@@ -200,6 +209,7 @@ def login(
 # ============================================================
 # GET CURRENT USER
 # ============================================================
+
 
 @app.get("/me")
 def get_current_user(
@@ -293,6 +303,7 @@ def get_current_user(
 # ============================================================
 # UPDATE CURRENT USER PROFILE
 # ============================================================
+
 
 @app.put("/me")
 def update_current_user(
@@ -391,30 +402,13 @@ def update_current_user(
     # --------------------------------------------------------
 
     user.full_name = user_data.full_name
-
     user.email = user_data.email
-
     user.age = user_data.age
-
-    user.riding_experience = (
-        user_data.riding_experience
-    )
-
-    user.riding_level = (
-        user_data.riding_level
-    )
-
-    user.discipline = (
-        user_data.discipline
-    )
-
-    user.primary_goal = (
-        user_data.primary_goal
-    )
-
-    user.horse_name = (
-        user_data.horse_name
-    )
+    user.riding_experience = user_data.riding_experience
+    user.riding_level = user_data.riding_level
+    user.discipline = user_data.discipline
+    user.primary_goal = user_data.primary_goal
+    user.horse_name = user_data.horse_name
 
     # --------------------------------------------------------
     # SAVE CHANGES
@@ -443,16 +437,11 @@ def update_current_user(
             "full_name": user.full_name,
             "email": user.email,
             "age": user.age,
-            "riding_experience":
-                user.riding_experience,
-            "riding_level":
-                user.riding_level,
-            "discipline":
-                user.discipline,
-            "primary_goal":
-                user.primary_goal,
-            "horse_name":
-                user.horse_name,
+            "riding_experience": user.riding_experience,
+            "riding_level": user.riding_level,
+            "discipline": user.discipline,
+            "primary_goal": user.primary_goal,
+            "horse_name": user.horse_name,
         },
     }
 
@@ -460,6 +449,7 @@ def update_current_user(
 # ============================================================
 # CREATE RIDE SESSION
 # ============================================================
+
 
 @app.post(
     "/rides",
@@ -607,3 +597,120 @@ def create_ride_session(
             else None
         ),
     }
+
+
+# ============================================================
+# GET MY RIDE HISTORY
+# ============================================================
+
+
+@app.get(
+    "/rides",
+    response_model=list[RideSessionResponse]
+)
+def get_my_rides(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db)
+):
+
+    # --------------------------------------------------------
+    # CHECK AUTHORIZATION HEADER
+    # --------------------------------------------------------
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header missing"
+        )
+
+    # --------------------------------------------------------
+    # CHECK BEARER FORMAT
+    # --------------------------------------------------------
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization format"
+        )
+
+    # --------------------------------------------------------
+    # EXTRACT TOKEN
+    # --------------------------------------------------------
+
+    token = authorization.split(" ")[1]
+
+    # --------------------------------------------------------
+    # VERIFY JWT TOKEN
+    # --------------------------------------------------------
+
+    payload = verify_access_token(token)
+
+    if not payload:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
+    # --------------------------------------------------------
+    # GET USER ID FROM TOKEN
+    # --------------------------------------------------------
+
+    user_id = payload.get("sub")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token payload"
+        )
+
+    # --------------------------------------------------------
+    # FIND USER
+    # --------------------------------------------------------
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.id == int(user_id))
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    # --------------------------------------------------------
+    # GET USER'S RIDES
+    # --------------------------------------------------------
+
+    rides = (
+        db.query(models.RideSession)
+        .filter(
+            models.RideSession.user_id == user.id
+        )
+        .order_by(
+            models.RideSession.started_at.desc()
+        )
+        .all()
+    )
+
+    # --------------------------------------------------------
+    # RETURN RIDE HISTORY
+    # --------------------------------------------------------
+
+    return [
+        {
+            "id": ride.id,
+            "user_id": ride.user_id,
+            "horse_name": ride.horse_name,
+            "discipline": ride.discipline,
+            "duration_seconds": ride.duration_seconds,
+            "started_at": ride.started_at.isoformat(),
+            "ended_at": (
+                ride.ended_at.isoformat()
+                if ride.ended_at
+                else None
+            ),
+        }
+        for ride in rides
+    ]
